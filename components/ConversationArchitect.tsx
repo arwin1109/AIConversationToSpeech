@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { Send, Sparkles, Loader2, PlayCircle, RotateCcw, User, Bot, Check, ChevronRight } from 'lucide-react';
+import { Send, Sparkles, Loader2, PlayCircle, RotateCcw, User, Bot, Check, ChevronRight, ChevronDown } from 'lucide-react';
 import { DialogueLine } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,9 +40,12 @@ Example Output format:
 `;
 
 const MODELS = [
-  { id: "gemini-2.0-flash", name: "2.0 Flash", type: "flash" },
-  { id: "gemini-1.5-flash", name: "1.5 Flash", type: "flash" },
-  { id: "gemini-1.5-pro", name: "1.5 Pro", type: "pro" },
+  { id: "gemini-2.0-pro-exp-02-05", name: "Gemini 2 Pro Latest" },
+  { id: "gemini-2.0-flash", name: "Gemini 2 Flash Latest" },
+  { id: "gemini-2.0-flash-lite-preview-02-05", name: "Gemini 2 Flash Lite Latest" },
+  { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Latest" },
+  { id: "gemini-3.1-pro-preview", name: "Gemini 3 Pro Latest" },
+  { id: "gemini-3-flash-lite-preview", name: "Gemini 3 Flash Lite Latest" },
 ];
 
 const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToPreview, onClose }) => {
@@ -52,13 +55,28 @@ const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToP
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [currentScript, setCurrentScript] = useState<DialogueLine[] | null>(null);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Handle click outside for dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedModelName = MODELS.find(m => m.id === selectedModel)?.name || "Select Model";
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -128,17 +146,53 @@ const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToP
         </div>
         
         <div className="flex items-center gap-3">
-            <div className="hidden sm:flex bg-zinc-100 dark:bg-zinc-900 p-1 rounded-full border border-zinc-200 dark:border-zinc-800">
-                {MODELS.map((model) => (
-                  <button 
-                    key={model.id}
-                    onClick={() => setSelectedModel(model.id)}
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase transition-all ${selectedModel === model.id ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-zinc-500'}`}
-                  >
-                    {model.name}
-                  </button>
-                ))}
+            {/* Model Selector Dropdown */}
+            <div className="relative" ref={dropdownRef}>
+                <button 
+                  onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                  className="flex items-center justify-between gap-3 px-4 py-2 min-w-[240px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:border-indigo-500/50 transition-all shadow-sm group"
+                >
+                  <span className="truncate">{selectedModelName}</span>
+                  <ChevronDown size={16} className={`text-zinc-400 group-hover:text-indigo-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {isModelMenuOpen && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 top-full mt-2 w-[280px] bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl shadow-2xl z-[100] overflow-hidden"
+                    >
+                      <div className="p-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2">Select model for chat</span>
+                      </div>
+                      <div className="max-h-[300px] overflow-y-auto custom-scrollbar py-2">
+                        {MODELS.map((model) => (
+                          <button 
+                            key={model.id}
+                            onClick={() => {
+                              setSelectedModel(model.id);
+                              setIsModelMenuOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-3 text-sm transition-colors flex flex-col gap-0.5 ${
+                              selectedModel === model.id 
+                              ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold' 
+                              : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>{model.name}</span>
+                            {selectedModel === model.id && (
+                              <span className="text-[10px] opacity-70 font-normal">Active model for processing</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
             </div>
+
             <button 
                 onClick={onClose}
                 className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
