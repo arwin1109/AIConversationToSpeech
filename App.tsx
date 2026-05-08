@@ -212,7 +212,7 @@ const App: React.FC = () => {
       {showScenario && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-0 sm:p-8 bg-zinc-900/60 backdrop-blur-md animate-fade-in">
               <div className="absolute inset-0" onClick={() => setShowScenario(false)}></div>
-              <div className="relative w-full max-w-4xl h-full sm:h-auto sm:max-h-[85vh] animate-slide-up overflow-hidden sm:rounded-3xl shadow-2xl">
+              <div className="relative w-full max-w-4xl h-full sm:max-h-[85vh] animate-slide-up overflow-hidden sm:rounded-3xl shadow-2xl flex flex-col">
                   <ScenarioPlayer 
                     voices={VOICE_DATA} 
                     transcript={customTranscript}

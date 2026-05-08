@@ -5,6 +5,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { google } from "googleapis";
 import cookieSession from "cookie-session";
+import fs from "fs";
+import { promises as fsPromises } from "fs";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +15,16 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const CACHE_DIR = path.join(process.cwd(), "audiocache");
+  const ARCHIVE_DIR = path.join(process.cwd(), "audiocache_archive");
+
+  // Ensure cache directories exist
+  if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR);
+  }
+  if (!fs.existsSync(ARCHIVE_DIR)) {
+    fs.mkdirSync(ARCHIVE_DIR);
+  }
 
   app.use(express.json({ limit: '50mb' }));
   app.use(
@@ -118,6 +131,59 @@ async function startServer() {
         return res.status(401).json({ error: "Session expired" });
       }
       res.status(500).json({ error: "Failed to upload to Google Drive" });
+    }
+  });
+
+  // Server Cache Routes
+  app.post("/api/cache/save", async (req, res) => {
+    const { fileName, audioBase64 } = req.body;
+    if (!fileName || !audioBase64) {
+      return res.status(400).json({ error: "Missing filename or audio data" });
+    }
+
+    try {
+      // Store raw base64 string as text so we get the exact same data back
+      const filePath = path.join(CACHE_DIR, fileName + ".b64");
+      await fsPromises.writeFile(filePath, audioBase64, "utf-8");
+      res.json({ success: true, path: fileName });
+    } catch (error) {
+      console.error("Error saving to server cache:", error);
+      res.status(500).json({ error: "Failed to save to server cache" });
+    }
+  });
+
+  app.delete("/api/cache/clear", async (req, res) => {
+    try {
+      const files = await fsPromises.readdir(CACHE_DIR);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      for (const file of files) {
+        const oldPath = path.join(CACHE_DIR, file);
+        const newPath = path.join(ARCHIVE_DIR, `${timestamp}_${file}`);
+        await fsPromises.rename(oldPath, newPath);
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error clearing server cache:", error);
+      res.status(500).json({ error: "Failed to clear server cache" });
+    }
+  });
+
+  app.get("/api/cache/list", async (req, res) => {
+    try {
+      const files = await fsPromises.readdir(CACHE_DIR);
+      res.json({ files });
+    } catch (error) {
+      res.json({ files: [] });
+    }
+  });
+
+  app.get("/api/cache/get/:fileName", async (req, res) => {
+    try {
+      const filePath = path.join(CACHE_DIR, req.params.fileName);
+      const audioBase64 = await fsPromises.readFile(filePath, "utf-8");
+      res.json({ audioBase64 });
+    } catch (error) {
+      res.status(404).json({ error: "File not found" });
     }
   });
 

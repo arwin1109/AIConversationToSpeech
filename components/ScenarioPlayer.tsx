@@ -5,13 +5,13 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { Play, Square, Loader2, Volume2, AlertCircle, X, ChevronRight, User, Terminal, Database, Activity, Download, Cloud, CloudUpload, LogOut } from 'lucide-react';
+import { Play, Square, Loader2, Volume2, AlertCircle, X, ChevronRight, User, Terminal, Activity, Download, Cloud, CloudUpload, LogOut, RotateCcw, Music, CloudDownload } from 'lucide-react';
 import { Voice } from '../types';
 import AudioVisualizer from './AudioVisualizer';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface DialogueLine {
-  speaker: 'Rahul' | 'Ankit' | 'Meera';
+  speaker: string;
   text: string;
 }
 
@@ -131,11 +131,57 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
   const [error, setError] = useState<string | null>(null);
   const [autoPlay, setAutoPlay] = useState(true);
   const [audioCache, setAudioCache] = useState<Record<number, string>>({});
-  const [isDownloadingFull, setIsDownloadingFull] = useState(false);
+  const [isGeneratingFull, setIsGeneratingFull] = useState(false);
+  const [isMergingFull, setIsMergingFull] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadStatus, setDownloadStatus] = useState<string>('');
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [isUploadingToDrive, setIsUploadingToDrive] = useState<Record<string, boolean>>({});
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [ttsProvider, setTtsProvider] = useState<'gemini' | 'puter'>('gemini');
+
+  const isAllCached = activeTranscript.length > 0 && activeTranscript.every((_, i) => !!audioCache[i]);
+
+  const generateAudioData = async (text: string, voiceName: string): Promise<string> => {
+    if (ttsProvider === 'gemini') {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-tts-preview",
+        contents: { parts: [{ text: text }] },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
+          },
+        },
+      });
+      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!data) throw new Error("Empty audio response from Gemini API");
+      return data;
+    } else {
+      const puter = (window as any).puter;
+      if (!puter) throw new Error("Puter.js not loaded. Please check your internet connection.");
+      
+      const audioElement = await puter.ai.txt2speech(text, { 
+        provider: "gemini", 
+        model: "gemini-3.1-flash-tts-preview", 
+        voice: voiceName 
+      });
+      
+      const res = await fetch(audioElement.src);
+      if (!res.ok) throw new Error("Failed to fetch audio from Puter");
+      const blob = await res.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      let binary = '';
+      const len = uint8Array.byteLength;
+      for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(uint8Array[i]);
+      }
+      return window.btoa(binary);
+    }
+  };
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -154,7 +200,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
   const speakerInfo = {
     'Rahul': { icon: <Terminal size={14} />, color: 'text-blue-500', bgColor: 'bg-blue-500/10', label: 'Tech Lead' },
     'Ankit': { icon: <Activity size={14} />, color: 'text-indigo-500', bgColor: 'bg-indigo-500/10', label: 'Frontend' },
-    'Meera': { icon: <Database size={14} />, color: 'text-purple-500', bgColor: 'bg-purple-500/10', label: 'Backend' },
+    'Meera': { icon: <Volume2 size={14} />, color: 'text-purple-500', bgColor: 'bg-purple-500/10', label: 'Backend' },
   };
 
   useEffect(() => {
@@ -230,7 +276,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
         // Re-using the logic from download full but without the download part
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
         const currentCache = { ...audioCache };
-        const mergedChunks: Uint8Array[] = [];
+        const mergedChunks: string[] = [];
 
         setDownloadStatus('Preparing full discussion...');
         for (let i = 0; i < activeTranscript.length; i++) {
@@ -254,25 +300,16 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
               setAudioCache(prev => ({ ...prev, [i]: data! }));
             }
           }
-          if (data) mergedChunks.push(decodeBase64(data));
+          if (data) mergedChunks.push(data);
           await new Promise(r => setTimeout(r, 100));
         }
 
-        const totalLength = mergedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        const combinedData = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of mergedChunks) {
-          combinedData.set(chunk, offset);
-          offset += chunk.length;
-        }
-
-        const header = createWavHeader(totalLength, 24000);
-        const fullAudio = new Uint8Array(header.length + combinedData.length);
-        fullAudio.set(header);
-        fullAudio.set(combinedData, header.length);
+        const finalBlob = await mergeToWavBlob(mergedChunks);
+        const arrayBuffer = await finalBlob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
         
         // Convert Uint8Array to base64
-        audioBase64 = btoa(fullAudio.reduce((data, byte) => data + String.fromCharCode(byte), ''));
+        audioBase64 = btoa(uint8Array.reduce((data, byte) => data + String.fromCharCode(byte), ''));
         fileName = "incident-discussion-full.wav";
       } else {
         audioBase64 = audioCache[index];
@@ -309,6 +346,76 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     }
   };
 
+  // Auto-save a single line to the server (fire-and-forget)
+  const saveLineToServer = async (index: number, speaker: string, audioBase64: string) => {
+    try {
+      await fetch('/api/cache/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: `line-${index}-${speaker}.wav`, audioBase64 })
+      });
+    } catch (e) {
+      console.error(`Failed to cache line ${index} to server`, e);
+    }
+  };
+
+  // Load any previously cached audio from the server
+  const loadServerCache = async (): Promise<Record<number, string>> => {
+    const serverCache: Record<number, string> = {};
+    try {
+      const listRes = await fetch('/api/cache/list');
+      const { files } = await listRes.json();
+      for (const file of files) {
+        const match = file.match(/^line-(\d+)-/);
+        if (match) {
+          const idx = parseInt(match[1], 10);
+          try {
+            const getRes = await fetch(`/api/cache/get/${encodeURIComponent(file)}`);
+            if (getRes.ok) {
+              const { audioBase64 } = await getRes.json();
+              if (audioBase64) serverCache[idx] = audioBase64;
+            }
+          } catch (e) { /* skip this file */ }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load server cache", e);
+    }
+    return serverCache;
+  };
+
+  const handleClearServerCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const res = await fetch('/api/cache/clear', { method: 'DELETE' });
+      if (res.ok) {
+        setDownloadStatus("Cache Cleared!");
+        setTimeout(() => setDownloadStatus(''), 2000);
+      }
+    } catch (e) {
+      setError("Failed to clear server cache");
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  const handleLogoutPuter = async () => {
+    try {
+      const puter = (window as any).puter;
+      if (puter && puter.auth) {
+        await puter.auth.signOut();
+        setDownloadStatus("Signed out of Puter successfully.");
+        setTimeout(() => setDownloadStatus(''), 3000);
+      } else {
+        setDownloadStatus("Puter is not loaded or already signed out.");
+        setTimeout(() => setDownloadStatus(''), 3000);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError("Failed to sign out of Puter: " + (e.message || "Unknown error"));
+    }
+  };
+
   // Auto-scroll to current line
   useEffect(() => {
     if (currentLineIndex >= 0 && scrollRef.current) {
@@ -318,6 +425,13 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
         }
     }
   }, [currentLineIndex]);
+
+  // Auto-dismiss error after 10 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   function decodeBase64(base64: string): Uint8Array {
     const binaryString = atob(base64);
@@ -329,7 +443,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     return bytes;
   }
 
-  async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
+  async function decodeRawPCM(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
     const dataInt16 = new Int16Array(data.buffer);
     const numChannels = 1;
     const sampleRate = 24000;
@@ -344,6 +458,72 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     }
     return buffer;
   }
+
+  const mergeToWavBlob = async (base64Chunks: string[]): Promise<Blob> => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    const ctx = audioContextRef.current;
+    
+    // Decode all chunks
+    const buffers: AudioBuffer[] = [];
+    for (const b64 of base64Chunks) {
+      const rawBytes = decodeBase64(b64);
+      let buf: AudioBuffer;
+      try {
+        const copy = rawBytes.buffer.slice(rawBytes.byteOffset, rawBytes.byteOffset + rawBytes.byteLength) as ArrayBuffer;
+        buf = await ctx.decodeAudioData(copy);
+      } catch (e) {
+        buf = await decodeRawPCM(rawBytes, ctx);
+      }
+      buffers.push(buf);
+    }
+    
+    // Render offline
+    const totalFrames = buffers.reduce((acc, b) => acc + b.length, 0);
+    const offlineCtx = new OfflineAudioContext(1, totalFrames, 24000);
+    let offset = 0;
+    for (const buf of buffers) {
+      const source = offlineCtx.createBufferSource();
+      source.buffer = buf;
+      source.connect(offlineCtx.destination);
+      source.start(offset);
+      offset += buf.duration;
+    }
+    
+    const renderedBuffer = await offlineCtx.startRendering();
+    
+    // Encode to WAV
+    const channelData = renderedBuffer.getChannelData(0);
+    const dataLen = channelData.length * 2;
+    const buffer = new ArrayBuffer(44 + dataLen);
+    const view = new DataView(buffer);
+    
+    const writeString = (v: DataView, o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataLen, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, 24000, true);
+    view.setUint32(28, 24000 * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, dataLen, true);
+    
+    let p = 44;
+    for (let i = 0; i < channelData.length; i++) {
+      let s = Math.max(-1, Math.min(1, channelData[i]));
+      s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      view.setInt16(p, s, true);
+      p += 2;
+    }
+    
+    return new Blob([buffer], { type: 'audio/wav' });
+  };
 
   const stopAudio = () => {
     if (sourceNodeRef.current) {
@@ -370,22 +550,9 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     const voice = speakerVoices[line.speaker as keyof typeof speakerVoices] || voices[0];
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview",
-        contents: { parts: [{ text: line.text }] },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice.name } },
-          },
-        },
-      });
+      const audioData = await generateAudioData(line.text, voice.name);
 
       if (!isMountedRef.current) return;
-
-      const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!audioData) throw new Error("No audio data received");
 
       setAudioCache(prev => ({ ...prev, [index]: audioData }));
 
@@ -396,7 +563,17 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
       }
 
       const rawBytes = decodeBase64(audioData);
-      const audioBuffer = await decodeAudioData(rawBytes, audioContextRef.current);
+      let audioBuffer: AudioBuffer;
+      
+      try {
+        // Try standard browser decoding first (for MP3/WebM from Puter)
+        // We copy the buffer because decodeAudioData detaches the arraybuffer on some browsers
+        const bufferCopy = rawBytes.buffer.slice(rawBytes.byteOffset, rawBytes.byteOffset + rawBytes.byteLength) as ArrayBuffer;
+        audioBuffer = await audioContextRef.current.decodeAudioData(bufferCopy);
+      } catch (e) {
+        // Fallback to custom raw PCM decoding (for Gemini)
+        audioBuffer = await decodeRawPCM(rawBytes, audioContextRef.current);
+      }
 
       if (!isMountedRef.current) return;
 
@@ -469,91 +646,98 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     return header;
   };
 
-  const handleDownloadFull = async () => {
-    if (isDownloadingFull) return;
-    setIsDownloadingFull(true);
+  const handleGenerateFull = async () => {
+    if (isGeneratingFull || isAllCached) return;
+    setIsGeneratingFull(true);
     setDownloadProgress(0);
-    setDownloadStatus('Initializing...');
+    setDownloadStatus('Loading server cache...');
     setError(null);
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-    // Use a local copy of the cache to avoid reacting to state update delays within the loop
-    const currentCache = { ...audioCache };
+    // Merge in-memory cache with any server-persisted cache
+    const serverCached = await loadServerCache();
+    const currentCache = { ...serverCached, ...audioCache };
+    // Sync server cache into React state
+    if (Object.keys(serverCached).length > 0) {
+      setAudioCache(prev => ({ ...prev, ...serverCached }));
+    }
 
     try {
-      // Step 1: Sequential Fetching
+      let apiCallCount = 0;
+
       for (let i = 0; i < activeTranscript.length; i++) {
         if (!isMountedRef.current) break;
         
         let audioData = currentCache[i];
+        const line = activeTranscript[i];
         
         if (!audioData) {
-          setDownloadStatus(`Downloading line ${i + 1} of ${activeTranscript.length}...`);
-          const line = activeTranscript[i];
+          // Rate limit: pause 60s after every 3 API calls
+          if (apiCallCount > 0 && apiCallCount % 3 === 0) {
+            for (let sec = 60; sec > 0; sec--) {
+              if (!isMountedRef.current) break;
+              setDownloadStatus(`Rate limit cooldown — resuming in ${sec}s (${i}/${activeTranscript.length} done)`);
+              await new Promise(r => setTimeout(r, 1000));
+            }
+          }
+
+          setDownloadStatus(`Generating line ${i + 1}/${activeTranscript.length} — ${line.speaker}`);
           const voice = speakerVoices[line.speaker as keyof typeof speakerVoices] || voices[0];
 
           try {
-            const response = await ai.models.generateContent({
-              model: "gemini-3.1-flash-tts-preview",
-              contents: { parts: [{ text: line.text }] },
-              config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                  voiceConfig: { prebuiltVoiceConfig: { voiceName: voice.name } },
-                },
-              },
-            });
-
-            audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            const audioData = await generateAudioData(line.text, voice.name);
             
             if (audioData) {
-              // Update both local copy and state
               currentCache[i] = audioData;
               setAudioCache(prev => ({ ...prev, [i]: audioData! }));
-              setDownloadProgress(Math.round(((i + 1) / TRANSCRIPT.length) * 100));
+              setDownloadProgress(Math.round(((i + 1) / activeTranscript.length) * 100));
+              // Auto-save to server
+              saveLineToServer(i, line.speaker, audioData);
             } else {
-              throw new Error(`Empty response for line ${i + 1}`);
+              throw new Error(`Empty audio response from API`);
             }
 
-            // Small delay to prevent hitting rate limits
-            await new Promise(r => setTimeout(r, 200));
-          } catch (err) {
+            apiCallCount++;
+          } catch (err: any) {
             console.error(`Failed at line ${i + 1}:`, err);
-            setError(`Error at line ${i + 1}. Tap Download again to resume.`);
-            setIsDownloadingFull(false);
+            const reason = err?.message || err?.statusText || 'Unknown error';
+            setError(`Line ${i + 1}/${activeTranscript.length} (${line.speaker}) failed: ${reason}. Tap Download again to resume.`);
+            setIsGeneratingFull(false);
             return;
           }
         } else {
-          // Already have it in cache, just update progress
-          setDownloadProgress(Math.round(((i + 1) / TRANSCRIPT.length) * 100));
+          setDownloadStatus(`Cached line ${i + 1}/${activeTranscript.length} — ${line.speaker}`);
+          setDownloadProgress(Math.round(((i + 1) / activeTranscript.length) * 100));
         }
       }
 
-      if (!isMountedRef.current) return;
+      setDownloadStatus('Generation complete!');
+      setTimeout(() => setDownloadStatus(''), 2000);
+    } catch (err) {
+      console.error(err);
+      setError("An error occurred during generation.");
+    } finally {
+      setIsGeneratingFull(false);
+    }
+  };
 
-      // Step 2: Merging
-      setDownloadStatus('Merging tracks...');
-      const mergedChunks: Uint8Array[] = [];
-      
+  const handleDownloadMerged = async () => {
+    if (!isAllCached || isMergingFull) return;
+    setIsMergingFull(true);
+    setDownloadStatus('Merging tracks...');
+    
+    try {
+      const chunksToMerge: string[] = [];
       for (let i = 0; i < activeTranscript.length; i++) {
-        const data = currentCache[i];
+        const data = audioCache[i];
         if (data) {
-          mergedChunks.push(decodeBase64(data));
+          chunksToMerge.push(data);
         } else {
           throw new Error(`Missing audio data for line ${i + 1} during merge.`);
         }
       }
 
-      const totalLength = mergedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-      const combinedData = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of mergedChunks) {
-        combinedData.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      const header = createWavHeader(totalLength, 24000);
-      const finalBlob = new Blob([header, combinedData], { type: 'audio/wav' });
+      const finalBlob = await mergeToWavBlob(chunksToMerge);
       const url = URL.createObjectURL(finalBlob);
       const link = document.createElement('a');
       link.href = url;
@@ -569,7 +753,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
       console.error(err);
       setError("An error occurred during audio assembly.");
     } finally {
-      setIsDownloadingFull(false);
+      setIsMergingFull(false);
     }
   };
 
@@ -580,7 +764,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
 
     const line = activeTranscript[index];
     const rawBytes = decodeBase64(audioData);
-    const blob = new Blob([rawBytes], { type: 'audio/wav' });
+    const blob = new Blob([rawBytes as any], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -617,7 +801,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
               <div className="flex items-center gap-1">
                 <button 
                     onClick={() => handleSaveToDrive('full')}
-                    disabled={isUploadingToDrive['full'] || isDownloadingFull}
+                    disabled={isUploadingToDrive['full'] || isGeneratingFull}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         isUploadingToDrive['full'] 
                         ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400' 
@@ -637,18 +821,67 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
                 </button>
               </div>
             )}
+            
+            <button
+                onClick={handleClearServerCache}
+                disabled={isClearingCache}
+                className="p-2 text-zinc-400 hover:text-red-500 rounded-full transition-colors"
+                title="Clear server cache"
+            >
+                {isClearingCache ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            </button>
+
+            <select 
+                value={ttsProvider}
+                onChange={(e) => setTtsProvider(e.target.value as 'gemini' | 'puter')}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-none outline-none cursor-pointer"
+            >
+                <option value="gemini">Gemini API</option>
+                <option value="puter">Puter API (Free)</option>
+            </select>
+            {ttsProvider === 'puter' && (
+                <button
+                    onClick={handleLogoutPuter}
+                    className="p-1.5 text-zinc-400 hover:text-red-500 rounded-full transition-colors bg-zinc-100 dark:bg-zinc-800"
+                    title="Sign out of Puter"
+                >
+                    <LogOut size={14} />
+                </button>
+            )}
+            
             <button 
-                onClick={handleDownloadFull}
-                disabled={isDownloadingFull}
+                onClick={handleGenerateFull}
+                disabled={isGeneratingFull || isAllCached}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
-                    isDownloadingFull 
+                    isGeneratingFull || isAllCached
                     ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400' 
                     : 'bg-indigo-600 hover:bg-indigo-700 text-white border-none'
                 }`}
             >
-                {isDownloadingFull ? <Loader2 size={12} className="animate-spin" /> : <Download size={14} />}
-                <span>Download Full Conversation</span>
+                {isGeneratingFull ? <Loader2 size={12} className="animate-spin" /> : <Music size={14} />}
+                <span>{isAllCached ? 'Audio Generated' : 'Generate Audio'}</span>
             </button>
+
+            <div className="relative group">
+                <button 
+                    onClick={handleDownloadMerged}
+                    disabled={!isAllCached || isMergingFull}
+                    className={`flex items-center justify-center p-2 rounded-full transition-all shadow-sm ${
+                        !isAllCached 
+                        ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed opacity-50' 
+                        : isMergingFull
+                        ? 'bg-indigo-100 text-indigo-400 dark:bg-indigo-900/30'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                >
+                    {isMergingFull ? <Loader2 size={16} className="animate-spin" /> : <CloudDownload size={16} />}
+                </button>
+                {/* Tooltip on hover */}
+                <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                    Download Full Conversation
+                </div>
+            </div>
+
             <button 
                 onClick={() => setAutoPlay(!autoPlay)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hidden sm:flex ${autoPlay ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800'}`}
@@ -664,6 +897,53 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
             </button>
         </div>
       </div>
+
+      {/* Error Flash Card - Top Left, auto-dismiss 10s */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, x: -20, y: -10 }}
+            animate={{ opacity: 1, x: 0, y: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="fixed top-4 left-4 z-[200] max-w-md bg-red-600 dark:bg-red-700 text-white rounded-2xl shadow-2xl shadow-red-900/30 overflow-hidden"
+          >
+            <div className="p-4 flex items-start gap-3">
+              <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wider opacity-80 mb-1">Error</p>
+                <p className="text-sm leading-relaxed">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors flex-shrink-0">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="h-1 bg-white/20">
+              <motion.div
+                initial={{ width: '100%' }}
+                animate={{ width: '0%' }}
+                transition={{ duration: 10, ease: 'linear' }}
+                className="h-full bg-white/50"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Download Progress Bar */}
+      {isGeneratingFull && (
+        <div className="mx-6 mt-3 animate-fade-in">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{downloadStatus}</span>
+            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{downloadProgress}%</span>
+          </div>
+          <div className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${downloadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Transcript Scroll Area */}
       <div 
