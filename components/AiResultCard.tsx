@@ -13,9 +13,10 @@ interface AiResultCardProps {
   result: AiRecommendation;
   voices: Voice[];
   onClose: () => void;
+  apiKey?: string;
 }
 
-const AiResultCard: React.FC<AiResultCardProps> = ({ result, voices, onClose }) => {
+const AiResultCard: React.FC<AiResultCardProps> = ({ result, voices, onClose, apiKey }) => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -136,7 +137,7 @@ const AiResultCard: React.FC<AiResultCardProps> = ({ result, voices, onClose }) 
                  </div>
                  
                  <div className="bg-white dark:bg-zinc-800 p-1 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-700">
-                    <AiTtsPreview text={result.sampleText} voices={voices} />
+                    <AiTtsPreview text={result.sampleText} voices={voices} apiKey={apiKey} />
                  </div>
             </div>
         </div>

@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
-*/
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { VOICE_DATA } from './constants';
 import Carousel3D from './components/Carousel3D';
@@ -12,10 +7,15 @@ import VoiceFinder from './components/VoiceFinder';
 import AiResultCard from './components/AiResultCard';
 import ScenarioPlayer from './components/ScenarioPlayer';
 import ConversationArchitect from './components/ConversationArchitect';
+import { AuthPage } from './components/AuthPage';
 import { FilterState, AiRecommendation, DialogueLine } from './types';
-import { Info } from 'lucide-react';
+import { Info, LogOut, Volume2, Sparkles, User } from 'lucide-react';
+import { ProfileModal } from './components/ProfileModal';
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<any>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<AiRecommendation | null>(null);
   const [isAiCardVisible, setIsAiCardVisible] = useState(false);
@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const [customTranscript, setCustomTranscript] = useState<DialogueLine[] | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'carousel' | 'grid'>('carousel');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   
   // Carousel state
   const [activeIndex, setActiveIndex] = useState(0);
@@ -34,6 +35,28 @@ const App: React.FC = () => {
     pitch: 'All',
     search: '',
   });
+
+  // Check auth status
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => {
+        if (!res.ok) throw new Error('Not logged in');
+        return res.json();
+      })
+      .then(data => {
+        if (data.user) setUser(data.user);
+      })
+      .catch(err => {
+        console.log("Auth check failed:", err.message);
+        setUser(null);
+      })
+      .finally(() => setAuthChecking(false));
+  }, []);
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setUser(null);
+  };
 
   // Theme Management
   useEffect(() => {
@@ -89,7 +112,23 @@ const App: React.FC = () => {
     setFilters({ ...filters, search: '' });
   };
 
-  const isModalOpen = showVoiceFinder || (aiResult && isAiCardVisible) || showScenario || showArchitect;
+  const checkApiKey = (action: () => void) => {
+    if (!user?.gemini_api_key) {
+      setShowProfile(true);
+      return;
+    }
+    action();
+  };
+
+  if (authChecking) {
+    return <div className="h-screen w-screen bg-black flex items-center justify-center text-white">Loading...</div>;
+  }
+
+  if (!user) {
+    return <AuthPage onLogin={setUser} />;
+  }
+
+  const isModalOpen = showVoiceFinder || (aiResult && isAiCardVisible) || showScenario || showArchitect || showProfile;
 
   return (
     <div className="h-screen w-screen bg-[#FDFDFD] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans overflow-hidden flex flex-col relative transition-colors duration-300">
@@ -108,71 +147,114 @@ const App: React.FC = () => {
         inert={isModalOpen ? true : undefined}
         style={isModalOpen ? { pointerEvents: 'none' } : {}}
       >
-        <FilterBar 
-          filters={filters}
-          onFilterChange={setFilters}
-          uniqueGenders={uniqueGenders}
-          uniquePitches={uniquePitches}
-          onOpenAiCasting={() => setShowVoiceFinder(true)}
-          onOpenScenario={() => {
-            setCustomTranscript(undefined);
-            setShowScenario(true);
-          }}
-          onOpenArchitect={() => setShowArchitect(true)}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          isDarkMode={isDarkMode}
-          toggleTheme={toggleTheme}
-        />
+        {/* User Status Bar */}
+        <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 px-6 py-2 flex justify-between items-center z-10">
+          <div className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
+            Welcome, <span className="text-indigo-600 dark:text-indigo-400">{user.username}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowProfile(true)} 
+              className="flex items-center gap-2 text-sm text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              <User size={16} /> Profile
+            </button>
+            <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-zinc-500 hover:text-red-500 transition-colors">
+              <LogOut size={16} /> Logout
+            </button>
+          </div>
+        </div>
 
-        <main className="flex-1 relative flex flex-col overflow-hidden">
-              {filteredVoices.length > 0 ? (
-                  viewMode === 'carousel' ? (
-                    <div className="w-full flex-1 flex items-center justify-center pb-8 min-h-0">
-                         <Carousel3D 
-                            voices={filteredVoices}
-                            activeIndex={activeIndex}
-                            onChange={setActiveIndex}
-                            playingVoice={playingVoice}
-                            onPlayToggle={handlePlayToggle}
-                            disabled={isModalOpen}
-                         />
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-y-auto">
-                      <GridView 
-                          voices={filteredVoices}
-                          playingVoice={playingVoice}
-                          onPlayToggle={handlePlayToggle}
-                      />
-                    </div>
-                  )
-              ) : (
-                  <div className="w-full h-full flex items-center justify-center pb-24">
-                      <div className="text-center animate-fade-in">
-                          <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 mb-6 shadow-sm">
-                              <Info size={32} className="text-zinc-300 dark:text-zinc-500" />
-                          </div>
-                          <h3 className="text-xl font-serif text-zinc-900 dark:text-white mb-2">No voices found</h3>
-                          <p className="text-zinc-500 dark:text-zinc-400 mb-6">Try adjusting your filters or use AI Match.</p>
-                          <button 
-                              onClick={() => setShowVoiceFinder(true)}
-                              className="px-4 py-2 bg-zinc-900 dark:bg-indigo-600 text-white rounded-full text-sm font-medium hover:bg-zinc-800 dark:hover:bg-indigo-500 transition-colors"
-                          >
-                              Open AI Casting
-                          </button>
-                      </div>
-                  </div>
-              )}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left Sidebar */}
+          <div className="w-64 border-r border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-sm p-4 flex flex-col gap-3 shrink-0 z-10 hidden md:flex">
+              <div className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-1">
+                  Conversations
+              </div>
               
-              {!aiResult && filteredVoices.length > 0 && viewMode === 'carousel' && (
-                  <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
-                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium tracking-widest uppercase bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm inline-block px-3 py-1 rounded-full border border-white/50 dark:border-zinc-800">
-                          {activeIndex + 1} / {filteredVoices.length}
-                      </p>
-                  </div>
-              )}
-        </main>
+              <button 
+                  onClick={() => checkApiKey(() => {
+                      setCustomTranscript(undefined);
+                      setShowScenario(true);
+                  })}
+                  className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-300 dark:hover:border-indigo-600 text-zinc-700 dark:text-zinc-200 rounded-xl text-sm font-medium shadow-sm transition-all hover:shadow-md w-full text-left"
+              >
+                  <Volume2 size={16} className="text-indigo-500" />
+                  <span className="flex-1">Incident Preview</span>
+              </button>
+
+              <button 
+                  onClick={() => checkApiKey(() => setShowArchitect(true))}
+                  className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all hover:-translate-y-0.5 active:translate-y-0 w-full text-left border-none"
+              >
+                  <Sparkles size={16} className="text-indigo-200 animate-pulse" />
+                  <span className="flex-1">Conversation Architect</span>
+              </button>
+          </div>
+
+          <div className="flex-1 flex flex-col min-w-0 relative">
+            <FilterBar 
+              filters={filters}
+              onFilterChange={setFilters}
+              uniqueGenders={uniqueGenders}
+              uniquePitches={uniquePitches}
+              onOpenAiCasting={() => checkApiKey(() => setShowVoiceFinder(true))}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              isDarkMode={isDarkMode}
+              toggleTheme={toggleTheme}
+            />
+
+            <main className="flex-1 relative flex flex-col overflow-hidden">
+                  {filteredVoices.length > 0 ? (
+                      viewMode === 'carousel' ? (
+                        <div className="w-full flex-1 flex items-center justify-center pb-8 min-h-0">
+                            <Carousel3D 
+                                voices={filteredVoices}
+                                activeIndex={activeIndex}
+                                onChange={setActiveIndex}
+                                playingVoice={playingVoice}
+                                onPlayToggle={handlePlayToggle}
+                                disabled={isModalOpen}
+                            />
+                        </div>
+                      ) : (
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                          <GridView 
+                              voices={filteredVoices}
+                              playingVoice={playingVoice}
+                              onPlayToggle={handlePlayToggle}
+                          />
+                        </div>
+                      )
+                  ) : (
+                      <div className="w-full h-full flex items-center justify-center pb-24">
+                          <div className="text-center animate-fade-in">
+                              <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 mb-6 shadow-sm">
+                                  <Info size={32} className="text-zinc-300 dark:text-zinc-500" />
+                              </div>
+                              <h3 className="text-xl font-serif text-zinc-900 dark:text-white mb-2">No voices found</h3>
+                              <p className="text-zinc-500 dark:text-zinc-400 mb-6">Try adjusting your filters or use AI Match.</p>
+                              <button 
+                                  onClick={() => checkApiKey(() => setShowVoiceFinder(true))}
+                                  className="px-4 py-2 bg-zinc-900 dark:bg-indigo-600 text-white rounded-full text-sm font-medium hover:bg-zinc-800 dark:hover:bg-indigo-500 transition-colors"
+                              >
+                                  Open AI Casting
+                              </button>
+                          </div>
+                      </div>
+                  )}
+                  
+                  {!aiResult && filteredVoices.length > 0 && viewMode === 'carousel' && (
+                      <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium tracking-widest uppercase bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm inline-block px-3 py-1 rounded-full border border-white/50 dark:border-zinc-800">
+                              {activeIndex + 1} / {filteredVoices.length}
+                          </p>
+                      </div>
+                  )}
+            </main>
+          </div>
+        </div>
       </div>
 
       {/* Modals are rendered outside the aria-hidden container */}
@@ -188,6 +270,7 @@ const App: React.FC = () => {
                 setShowVoiceFinder(false);
             }}
             onClose={() => setShowVoiceFinder(false)}
+            apiKey={user.gemini_api_key}
         />
       )}
 
@@ -204,6 +287,7 @@ const App: React.FC = () => {
                     result={aiResult} 
                     voices={filteredVoices} 
                     onClose={clearAiResult} 
+                    apiKey={user.gemini_api_key}
                  />
              </div>
           </div>
@@ -212,12 +296,13 @@ const App: React.FC = () => {
       {showScenario && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-0 sm:p-8 bg-zinc-900/60 backdrop-blur-md animate-fade-in">
               <div className="absolute inset-0" onClick={() => setShowScenario(false)}></div>
-              <div className="relative w-full max-w-4xl h-full sm:max-h-[85vh] animate-slide-up overflow-hidden sm:rounded-3xl shadow-2xl flex flex-col">
+              <div className="relative w-full max-w-6xl h-full sm:max-h-[90vh] animate-slide-up overflow-hidden sm:rounded-3xl shadow-2xl flex flex-col">
                   <ScenarioPlayer 
                     voices={VOICE_DATA} 
                     transcript={customTranscript}
                     title={customTranscript ? "Architected Scenario" : undefined}
                     onClose={() => setShowScenario(false)} 
+                    apiKey={user.gemini_api_key}
                   />
               </div>
           </div>
@@ -234,11 +319,18 @@ const App: React.FC = () => {
                         setShowScenario(true);
                     }}
                     onClose={() => setShowArchitect(false)} 
+                    apiKey={user.gemini_api_key}
                   />
               </div>
           </div>
       )}
 
+      <ProfileModal 
+        isOpen={showProfile} 
+        onClose={() => setShowProfile(false)} 
+        user={user}
+        onUpdateUser={setUser}
+      />
     </div>
   );
 };

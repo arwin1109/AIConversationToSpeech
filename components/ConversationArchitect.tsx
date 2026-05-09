@@ -17,6 +17,7 @@ interface Message {
 interface ConversationArchitectProps {
   onPushToPreview: (transcript: DialogueLine[]) => void;
   onClose: () => void;
+  apiKey?: string;
 }
 
 const SYSTEM_PROMPT = `
@@ -48,7 +49,7 @@ const MODELS = [
   { id: "gemini-3-flash-lite-preview", name: "Gemini 3 Flash Lite Latest" },
 ];
 
-const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToPreview, onClose }) => {
+const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToPreview, onClose, apiKey }) => {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hi! I'm your Conversation Architect. Send me meeting notes, a scenario, or just a rough idea, and I'll build a structured dialogue script for you." }
   ]);
@@ -87,8 +88,7 @@ const ConversationArchitect: React.FC<ConversationArchitectProps> = ({ onPushToP
     setIsLoading(true);
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY || '';
-      const genAI = new GoogleGenAI(apiKey);
+      const genAI = new GoogleGenAI(apiKey || '');
       const model = genAI.getGenerativeModel({ 
         model: selectedModel,
         systemInstruction: SYSTEM_PROMPT

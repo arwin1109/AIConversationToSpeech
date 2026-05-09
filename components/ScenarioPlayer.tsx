@@ -70,6 +70,7 @@ interface ScenarioPlayerProps {
   onClose: () => void;
   transcript?: DialogueLine[];
   title?: string;
+  apiKey?: string;
 }
 
 const DEFAULT_TRANSCRIPT: DialogueLine[] = [
@@ -139,12 +140,14 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
   const [isUploadingToDrive, setIsUploadingToDrive] = useState<Record<string, boolean>>({});
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [ttsProvider, setTtsProvider] = useState<'gemini' | 'puter'>('gemini');
+  const [delaySeconds, setDelaySeconds] = useState(5);
+  const [requestsBeforeDelay, setRequestsBeforeDelay] = useState(3);
 
   const isAllCached = activeTranscript.length > 0 && activeTranscript.every((_, i) => !!audioCache[i]);
 
   const generateAudioData = async (text: string, voiceName: string): Promise<string> => {
     if (ttsProvider === 'gemini') {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: apiKey || '' });
       const response = await ai.models.generateContent({
         model: "gemini-3.1-flash-tts-preview",
         contents: { parts: [{ text: text }] },
@@ -653,7 +656,7 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
     setDownloadStatus('Loading server cache...');
     setError(null);
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+    const ai = new GoogleGenAI({ apiKey: apiKey || '' });
     // Merge in-memory cache with any server-persisted cache
     const serverCached = await loadServerCache();
     const currentCache = { ...serverCached, ...audioCache };
@@ -672,9 +675,9 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
         const line = activeTranscript[i];
         
         if (!audioData) {
-          // Rate limit: pause 60s after every 3 API calls
-          if (apiCallCount > 0 && apiCallCount % 3 === 0) {
-            for (let sec = 60; sec > 0; sec--) {
+          // Rate limit: pause based on user settings
+          if (apiCallCount > 0 && apiCallCount % requestsBeforeDelay === 0) {
+            for (let sec = delaySeconds; sec > 0; sec--) {
               if (!isMountedRef.current) break;
               setDownloadStatus(`Rate limit cooldown — resuming in ${sec}s (${i}/${activeTranscript.length} done)`);
               await new Promise(r => setTimeout(r, 1000));
@@ -848,6 +851,29 @@ const ScenarioPlayer: React.FC<ScenarioPlayerProps> = ({ voices, onClose, transc
                     <LogOut size={14} />
                 </button>
             )}
+            
+            {/* Rate Limit Settings */}
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">Rate Limit</span>
+                <div className="flex items-center gap-1">
+                    <input 
+                        type="number" 
+                        value={requestsBeforeDelay}
+                        onChange={(e) => setRequestsBeforeDelay(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-8 bg-transparent text-xs font-bold text-indigo-600 focus:outline-none text-center"
+                        title="Requests before delay"
+                    />
+                    <span className="text-[10px] text-zinc-400">req /</span>
+                    <input 
+                        type="number" 
+                        value={delaySeconds}
+                        onChange={(e) => setDelaySeconds(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-8 bg-transparent text-xs font-bold text-indigo-600 focus:outline-none text-center"
+                        title="Delay in seconds"
+                    />
+                    <span className="text-[10px] text-zinc-400">sec</span>
+                </div>
+            </div>
             
             <button 
                 onClick={handleGenerateFull}

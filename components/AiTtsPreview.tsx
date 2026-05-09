@@ -12,6 +12,7 @@ import AudioVisualizer from './AudioVisualizer';
 interface AiTtsPreviewProps {
   text: string;
   voices: Voice[];
+  apiKey?: string;
 }
 
 function decodeBase64(base64: string): Uint8Array {
@@ -43,7 +44,7 @@ async function decodeAudioData(
   return buffer;
 }
 
-const AiTtsPreview: React.FC<AiTtsPreviewProps> = ({ text, voices }) => {
+const AiTtsPreview: React.FC<AiTtsPreviewProps> = ({ text, voices, apiKey }) => {
   const [selectedVoiceName, setSelectedVoiceName] = useState(voices[0]?.name || '');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -96,7 +97,7 @@ const AiTtsPreview: React.FC<AiTtsPreviewProps> = ({ text, voices }) => {
     setError(null);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: apiKey || '' });
       const response = await ai.models.generateContent({
         model: "gemini-3.1-flash-tts-preview",
         contents: { parts: [{ text: text }] },
@@ -150,7 +151,7 @@ const AiTtsPreview: React.FC<AiTtsPreviewProps> = ({ text, voices }) => {
     if (!lastAudioBase64) return;
 
     const rawBytes = decodeBase64(lastAudioBase64);
-    const blob = new Blob([rawBytes], { type: 'audio/wav' });
+    const blob = new Blob([rawBytes as any], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

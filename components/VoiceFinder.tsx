@@ -12,9 +12,10 @@ interface VoiceFinderProps {
   voices: Voice[];
   onRecommendation: (rec: AiRecommendation | null) => void;
   onClose: () => void;
+  apiKey?: string;
 }
 
-const VoiceFinder: React.FC<VoiceFinderProps> = ({ voices, onRecommendation, onClose }) => {
+const VoiceFinder: React.FC<VoiceFinderProps> = ({ voices, onRecommendation, onClose, apiKey }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +71,7 @@ const VoiceFinder: React.FC<VoiceFinderProps> = ({ voices, onRecommendation, onC
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: apiKey || '' });
       
       const simplifiedVoices = voices.map(v => ({
         name: v.name,

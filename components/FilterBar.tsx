@@ -13,8 +13,6 @@ interface FilterBarProps {
   uniqueGenders: string[];
   uniquePitches: string[];
   onOpenAiCasting: () => void;
-  onOpenScenario: () => void;
-  onOpenArchitect: () => void;
   viewMode: 'carousel' | 'grid';
   onViewModeChange: (mode: 'carousel' | 'grid') => void;
   isDarkMode: boolean;
@@ -27,8 +25,6 @@ const FilterBar: React.FC<FilterBarProps> = ({
   uniqueGenders, 
   uniquePitches,
   onOpenAiCasting,
-  onOpenScenario,
-  onOpenArchitect,
   viewMode,
   onViewModeChange,
   isDarkMode,
@@ -70,22 +66,6 @@ const FilterBar: React.FC<FilterBarProps> = ({
                         <Sparkles size={14} className="text-indigo-300 dark:text-indigo-100 group-hover:text-indigo-200 transition-colors" />
                         <span className="tracking-wide hidden sm:inline">AI Casting Director</span>
                         <span className="tracking-wide sm:hidden">Casting</span>
-                    </button>
-
-                    <button 
-                        onClick={onOpenScenario}
-                        className="flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-700 dark:text-zinc-200 rounded-full text-xs sm:text-sm font-medium shadow-sm transition-all hover:scale-105 active:scale-95 group shrink-0"
-                    >
-                        <Volume2 size={14} className="text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors" />
-                        <span className="tracking-wide">Incident Preview</span>
-                    </button>
-
-                    <button 
-                        onClick={onOpenArchitect}
-                        className="flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95 group shrink-0 border-none"
-                    >
-                        <Sparkles size={14} className="text-white animate-pulse" />
-                        <span className="tracking-wide">Conversation Architect</span>
                     </button>
                 </div>
 
